@@ -59,7 +59,7 @@ val_dataset = Dataset_Type(Dataset_Path[dataset_name], "val", transform_val)
 val_loader = DataLoader(val_dataset, batch_size=8, collate_fn=val_dataset.collate, num_workers=4)
 
 # ------------ preparation ------------
-net = SCNN(resize_shape, pretrained=True)
+net = SCNN(resize_shape, pretrained=False)
 net = net.to(device)
 net = torch.nn.DataParallel(net)
 
