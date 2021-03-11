@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import pretrainedmodels
 
 
 class SCNN(nn.Module):
@@ -27,20 +28,33 @@ class SCNN(nn.Module):
 
         self.ce_loss = nn.CrossEntropyLoss(weight=torch.tensor([self.scale_background, 1, 1, 1, 1]))
         self.bce_loss = nn.BCELoss()
+        
+        ## Change 96 to 576 for xception
+        self.conv = nn.Conv2d(96, 512, (1, 1))
 
     def forward(self, img, seg_gt=None, exist_gt=None):
+        #print("Before backbone...")
         x = self.backbone(img)
+        #print("After backbone...")
+        #print("1:", x.shape)
+        x = self.conv(x)
+        #print("2:", x.shape)
         x = self.layer1(x)
+        #print("3:", x.shape)
         x = self.message_passing_forward(x)
         x = self.layer2(x)
-
-        seg_pred = F.interpolate(x, scale_factor=8, mode='bilinear', align_corners=True)
+        
+        seg_pred = F.interpolate(x, scale_factor=16, mode='bilinear', align_corners=True)
+        #print("4:", seg_pred.shape)
         x = self.layer3(x)
         x = x.view(-1, self.fc_input_feature)
         exist_pred = self.fc(x)
 
         if seg_gt is not None and exist_gt is not None:
+            #print("5:", seg_gt.shape)
             loss_seg = self.ce_loss(seg_pred, seg_gt)
+            #print("6:", exist_pred.shape)
+            #print("7:", exist_gt.shape)
             loss_exist = self.bce_loss(exist_pred, exist_gt)
             loss = loss_seg * self.scale_seg + loss_exist * self.scale_exist
         else:
@@ -84,21 +98,36 @@ class SCNN(nn.Module):
 
     def net_init(self, input_size, ms_ks):
         input_w, input_h = input_size
-        self.fc_input_feature = 5 * int(input_w/16) * int(input_h/16)
-        self.backbone = models.vgg16_bn(pretrained=self.pretrained).features
+        self.fc_input_feature = 5 * int(input_w/32) * int(input_h/32)
+        #self.backbone = models.vgg16_bn(pretrained=self.pretrained).features
+        
+        # ---- xception ----
+        #model_name = 'xception'
+        #model = pretrainedmodels.__dict__[model_name](num_classes=1000, pretrained='imagenet')
+        #modules = list(model.children())[:8]
+        #self.backbone = nn.Sequential(*modules)
 
+       
+        # ---- mobile net ----
+        self.backbone = torch.hub.load('pytorch/vision:v0.6.0', 'mobilenet_v2', pretrained=True)
+        modules = list(self.backbone.children())[0][:12]
+        self.backbone = nn.Sequential(*modules)
+        
+        print(self.backbone)
         # ----------------- process backbone -----------------
-        for i in [34, 37, 40]:
-            conv = self.backbone._modules[str(i)]
-            dilated_conv = nn.Conv2d(
-                conv.in_channels, conv.out_channels, conv.kernel_size, stride=conv.stride,
-                padding=tuple(p * 2 for p in conv.padding), dilation=2, bias=(conv.bias is not None)
-            )
-            dilated_conv.load_state_dict(conv.state_dict())
-            self.backbone._modules[str(i)] = dilated_conv
-        self.backbone._modules.pop('33')
-        self.backbone._modules.pop('43')
+#         for i in [34, 37, 40]:
+#             conv = self.backbone._modules[str(i)]
+#             dilated_conv = nn.Conv2d(
+#                 conv.in_channels, conv.out_channels, conv.kernel_size, stride=conv.stride,
+#                 padding=tuple(p * 2 for p in conv.padding), dilation=2, bias=(conv.bias is not None)
+#             )
+#             dilated_conv.load_state_dict(conv.state_dict())
+#             self.backbone._modules[str(i)] = dilated_conv
+#         self.backbone._modules.pop('33')
+#         self.backbone._modules.pop('43')
+#         print(self.backbone)
 
+    
         # ----------------- SCNN part -----------------
         self.layer1 = nn.Sequential(
             nn.Conv2d(512, 1024, 3, padding=4, dilation=4, bias=False),
