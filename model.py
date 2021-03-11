@@ -29,7 +29,7 @@ class SCNN(nn.Module):
         self.ce_loss = nn.CrossEntropyLoss(weight=torch.tensor([self.scale_background, 1, 1, 1, 1]))
         self.bce_loss = nn.BCELoss()
         
-        ## Change 96 to 576 for xception
+        ## Change 96 to 728 for xception
         self.conv = nn.Conv2d(96, 512, (1, 1))
 
     def forward(self, img, seg_gt=None, exist_gt=None):
