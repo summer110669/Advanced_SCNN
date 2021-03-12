@@ -4,8 +4,8 @@
 
   "dataset": {
     "dataset_name": "Tusimple",
-    "batch_size": 32,
-    "resize_shape": [512, 288]
+    "batch_size": 16,
+    "resize_shape": [224, 224]
   },
 
   "optim": {

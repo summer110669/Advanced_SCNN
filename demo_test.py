@@ -1,67 +1,82 @@
 import argparse
+import json
+import os
+import shutil
+import time
+import warnings
+import math
 import cv2
+import sys
 import torch
+import torch.optim as optim
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from tqdm import tqdm
+import numpy as np
+from PIL import Image
 
-from model import SCNN
-from utils.prob2lines import getLane
-from utils.transforms import *
+# from dataset import Tusimple
+from model import *
 
-net = SCNN(input_size=(800, 288), pretrained=False)
-mean=(0.3598, 0.3653, 0.3662) # CULane mean, std
-std=(0.2573, 0.2663, 0.2756)
-transform_img = Resize((800, 288))
-transform_to_net = Compose(ToTensor(), Normalize(mean=mean, std=std))
+# ------------ config ------------
+device = torch.device('cpu')
 
+# ------------ train data ------------
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--img_path", '-i', type=str, default="demo/demo.jpg", help="Path to demo img")
-    parser.add_argument("--weight_path", '-w', type=str, help="Path to model weights")
-    parser.add_argument("--visualize", '-v', action="store_true", default=False, help="Visualize the result")
-    args = parser.parse_args()
-    return args
-
-
-def main():
-    args = parse_args()
-    img_path = args.img_path
-    weight_path = args.weight_path
-
-    img = cv2.imread(img_path)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = transform_img({'img': img})['img']
-    x = transform_to_net({'img': img})['img']
-    x.unsqueeze_(0)
-
-    save_dict = torch.load(weight_path, map_location='cpu')
-    net.load_state_dict(save_dict['net'])
-    net.eval()
-
-    seg_pred, exist_pred = net(x)[:2]
-    seg_pred = seg_pred.detach().cpu().numpy()
-    exist_pred = exist_pred.detach().cpu().numpy()
-    seg_pred = seg_pred[0]
-    exist = [1 if exist_pred[0, i] > 0.5 else 0 for i in range(4)]
-
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    lane_img = np.zeros_like(img)
-    color = np.array([[255, 125, 0], [0, 255, 0], [0, 0, 255], [0, 255, 255]], dtype='uint8')
-    coord_mask = np.argmax(seg_pred, axis=0)
-    for i in range(0, 4):
-        if exist_pred[0, i] > 0.5:
-            lane_img[coord_mask == (i + 1)] = color[i]
-    img = cv2.addWeighted(src1=lane_img, alpha=0.8, src2=img, beta=1., gamma=0.)
-    cv2.imwrite("demo/demo_result.jpg", img)
-
-    for x in getLane.prob2lines_CULane(seg_pred, exist):
-        print(x)
-
-    if args.visualize:
-        print([1 if exist_pred[0, i] > 0.5 else 0 for i in range(4)])
-        cv2.imshow("", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+transform_img = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+])
 
 
+    
 if __name__ == "__main__":
-    main()
+    net = SCNN(input_size=(224, 224), pretrained=False)
+    net.load_state_dict(torch.load('./experiments/exp0/exp0_best_xavier.pth', map_location='cpu')['net']) #
+    net.to(device)
+    net.eval()
+    color = [(255, 125, 0), (0, 255, 0), (0, 0, 255), (0, 255, 255)]
+    
+    jpg = sys.argv[1]
+    with torch.no_grad(): 
+        img = Image.open(jpg)
+        print(img)
+        orig = cv2.imread(jpg)
+        img = transform_img(img)
+        img = img.to(device)
+        img = img.unsqueeze(0)
+
+        #for _ in range(100):
+        #    _ = net(img)
+
+        t_all = []
+        for i in range(1):
+            t1 = time.time()
+            seg_pred, _, _, _, _ = net(img) #
+            t2 = time.time()
+            t_all.append(t2 - t1)
+            seg_pred = seg_pred.squeeze(0).cpu().numpy()
+            seg_pred = seg_pred.transpose(1, 2, 0)
+            # seg_pred = cv2.resize(seg_pred, (1640, 590), cv2.INTER_NEAREST)
+            seg_pred = cv2.resize(seg_pred, (1280, 720), cv2.INTER_NEAREST)
+            coord_mask = np.argmax(seg_pred, axis=2)
+
+            for i in range(0, 4):
+                mask = coord_mask == (i + 1)
+                pred_i = seg_pred[:, :, i+1] * mask
+                # for j in range(12, 29):
+                for j in range(16, 72):
+                    row = pred_i[10*j]
+                    # row = pred_i[20*j]
+                    m = np.max(row)
+                    p = np.argmax(row)
+                    if m > 0:
+                        cv2.circle(orig, (p, 10*j), 5, color[i], -1)
+                        # cv2.circle(orig, (p, 20*j), 5, color[i], -1)
+            cv2.imwrite('result.jpg', orig)
+
+        print('\tAverage FPS: ', 1 / np.mean(t_all))
+        print('\tFastest FPS: ', 1 / np.min(t_all))
+        print('\tSlowest FPS: ', 1 / np.max(t_all))

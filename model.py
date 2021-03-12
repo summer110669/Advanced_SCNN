@@ -30,15 +30,22 @@ class SCNN(nn.Module):
 
     def forward(self, img, seg_gt=None, exist_gt=None):
         x = self.backbone(img)
+        #print("x: ", x.shape)
         x = self.layer1(x)
+        #print("x: ", x.shape)
         x = self.message_passing_forward(x)
+        #print("x: ", x.shape)
         x = self.layer2(x)
-
+        #print("x: ", x.shape)
         seg_pred = F.interpolate(x, scale_factor=8, mode='bilinear', align_corners=True)
+        #print("seg_pred: ", seg_pred.shape)
         x = self.layer3(x)
+        #print("x: ", x.shape)
         x = x.view(-1, self.fc_input_feature)
+        #print("x: ", x.shape)
         exist_pred = self.fc(x)
-
+        #print("exist_pred: ", exist_pred.shape)
+        
         if seg_gt is not None and exist_gt is not None:
             loss_seg = self.ce_loss(seg_pred, seg_gt)
             loss_exist = self.bce_loss(exist_pred, exist_gt)
@@ -85,9 +92,17 @@ class SCNN(nn.Module):
     def net_init(self, input_size, ms_ks):
         input_w, input_h = input_size
         self.fc_input_feature = 5 * int(input_w/16) * int(input_h/16)
-        self.backbone = models.vgg16_bn(pretrained=self.pretrained).features
-
+        #self.backbone = models.vgg16_bn(pretrained=self.pretrained).features
+               
+        self.backbone = models.resnet50(pretrained=self.pretrained)
+        print(self.backbone)
+        modules=list(self.backbone.children())[:-4]
+        self.backbone = nn.Sequential(*modules)
+        
+        
+        '''
         # ----------------- process backbone -----------------
+       
         for i in [34, 37, 40]:
             conv = self.backbone._modules[str(i)]
             dilated_conv = nn.Conv2d(
@@ -98,7 +113,9 @@ class SCNN(nn.Module):
             self.backbone._modules[str(i)] = dilated_conv
         self.backbone._modules.pop('33')
         self.backbone._modules.pop('43')
-
+        
+        '''
+        print(self.backbone)
         # ----------------- SCNN part -----------------
         self.layer1 = nn.Sequential(
             nn.Conv2d(512, 1024, 3, padding=4, dilation=4, bias=False),
